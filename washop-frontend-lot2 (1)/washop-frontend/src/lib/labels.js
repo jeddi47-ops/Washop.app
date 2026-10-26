@@ -13,6 +13,7 @@ export const PAYMENT_METHODS = [
   { code: "cash", label: "Espèces" },
   { code: "mobile_money", label: "Mobile money" },
   { code: "card", label: "Carte" },
+  { code: "credit", label: "Crédit" },
 ];
 export const paymentLabel = (code) => PAYMENT_METHODS.find((m) => m.code === code)?.label || (code === "other" ? "Autre" : code || "");
 
@@ -32,9 +33,12 @@ export const ACTION_LABELS = {
   login: "Connexion",
   logout: "Déconnexion",
   session_replaced: "Session remplacée",
+  credit_created: "Crédit accordé",
+  credit_payment_recorded: "Remboursement de crédit",
+  credit_limit_override: "Limite de crédit dépassée (validée)",
 };
 export const actionTone = (action) =>
-  ({ sale_cancelled: "red", product_archived: "red", user_disabled: "red", product_price_changed: "blue", product_created: "green", product_stock_adjusted: "green", sale_created: "green" }[action] || "grey");
+  ({ sale_cancelled: "red", product_archived: "red", user_disabled: "red", product_price_changed: "blue", product_created: "green", product_stock_adjusted: "green", sale_created: "green", credit_created: "blue", credit_payment_recorded: "green", credit_limit_override: "red" }[action] || "grey");
 
 const FIELD_LABELS = {
   name: "Nom", description: "Description", category: "Catégorie", unit: "Unité", sale_price: "Prix de vente",
@@ -42,12 +46,15 @@ const FIELD_LABELS = {
   code: "Code", code_type: "Type de code", is_archived: "Statut", is_active: "Statut", device_type: "Appareil",
   status: "Statut", number: "N°", total: "Total", payment_method: "Paiement", items: "Articles", type: "Type",
   reason: "Raison", username: "Identifiant", role: "Rôle", replaced_by: "Remplacée par",
+  customer_name: "Client", sale_number: "Vente", total_due: "Total dû", down_payment: "Acompte", balance: "Reste à payer",
+  amount: "Montant", current_debt: "Dette actuelle", new_debt: "Dette après", max_debt: "Limite", authorized_by_name: "Validé par",
 };
 
 function formatField(key, value) {
   if (value === null || value === undefined || value === "") return "—";
   switch (key) {
-    case "sale_price": case "purchase_price": case "total": return fc(value);
+    case "sale_price": case "purchase_price": case "total": case "total_due": case "down_payment": case "balance":
+    case "amount": case "current_debt": case "new_debt": case "max_debt": return fc(value);
     case "quantity": case "low_stock_threshold": return qty(value);
     case "expiry_date": return formatDateTime(value).slice(0, 10);
     case "is_archived": return value ? "Archivé" : "Actif";
