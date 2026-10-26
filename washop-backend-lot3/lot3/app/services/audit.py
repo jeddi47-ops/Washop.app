@@ -13,6 +13,7 @@ AUDIT_ACTIONS = (
     "product_created", "product_updated", "product_price_changed", "product_stock_adjusted", "product_archived",
     "sale_created", "sale_cancelled", "user_created", "user_disabled", "user_password_reset",
     "login", "logout", "session_replaced",
+    "credit_created", "credit_payment_recorded", "credit_limit_override",
 )
 
 
