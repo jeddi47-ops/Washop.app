@@ -20,6 +20,7 @@ const BADGES = {
   rupture: ["Rupture", "red"],
   payee: ["Payée", "paid"],
   annulee: ["Annulée", "red"],
+  credit: ["À crédit", "yellow"],
   desactive: ["Désactivé", "grey"],
 };
 
@@ -34,8 +35,8 @@ export function StockBadge({ product, business, normalLabel = "actif" }) {
   return <Badge kind={s === "normal" ? normalLabel : s} />;
 }
 
-export function SaleBadge({ status }) {
-  return <Badge kind={status === "cancelled" ? "annulee" : "payee"} />;
+export function SaleBadge({ status, credit }) {
+  return <Badge kind={status === "cancelled" ? "annulee" : credit ? "credit" : "payee"} />;
 }
 
 export function Button({ kind = "primary", icon: Icon, children, loading, className, size, ...rest }) {
