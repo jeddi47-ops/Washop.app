@@ -13,7 +13,12 @@ from .services.sessions import ENDED_MESSAGES, REPLACED_MESSAGES, touch_session
 
 ALGORITHM = "HS256"
 ACCOUNT_DISABLED_MESSAGE = "Ton compte a été désactivé. Contacte le propriétaire."
-DEFAULT_SETTINGS = {"low_stock_default_threshold": 5, "expiry_alert_days": 30, "forecast_alert_days": 7}
+DEFAULT_SETTINGS = {
+    "low_stock_default_threshold": 5, "expiry_alert_days": 30, "forecast_alert_days": 7,
+    "credit_enabled": True, "credit_interest_percent": 0, "credit_min_down_percent": 0,
+    "credit_max_debt": 0,          # 0 = pas de limite ; sinon dette maximale par client (même numéro de pièce d'identité)
+    "phone_country_code": "",      # indicatif sans « + » (ex. 243) : sert aux liens WhatsApp
+}
 _bearer = HTTPBearer(auto_error=False)
 
 
