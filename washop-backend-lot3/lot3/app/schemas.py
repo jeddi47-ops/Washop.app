@@ -92,6 +92,12 @@ class SettingsIn(BaseModel):
     low_stock_default_threshold: Optional[float] = Field(default=None, ge=0, le=1_000_000)
     expiry_alert_days: Optional[int] = Field(default=None, ge=0, le=3650)
     forecast_alert_days: Optional[int] = Field(default=None, ge=0, le=3650)
+    # Vente à crédit : choisi par le propriétaire
+    credit_enabled: Optional[bool] = None
+    credit_interest_percent: Optional[float] = Field(default=None, ge=0, le=100)   # ex. 15 = 15 % ajoutés au prix
+    credit_min_down_percent: Optional[float] = Field(default=None, ge=0, le=100)   # acompte minimum exigé, en % du total
+    credit_max_debt: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)     # dette maximale par client (0 = illimitée)
+    phone_country_code: Optional[str] = Field(default=None, pattern=r"^\d{0,4}$")  # ex. « 243 »
 
 
 class BusinessUpdate(BaseModel):
@@ -185,12 +191,58 @@ class SaleLineIn(BaseModel):
     scanned_code: Optional[str] = Field(default=None, max_length=128)  # code scanné, gardé dans la ligne
 
 
+class CreditIn(BaseModel):
+    """Formulaire de vente à crédit. Les intérêts et l'acompte minimum viennent des réglages du propriétaire."""
+    customer_name: str = Field(min_length=2, max_length=120)
+    customer_id_number: str = Field(min_length=3, max_length=40)   # numéro de pièce d'identité
+    customer_phone: str = Field(min_length=6, max_length=30)       # obligatoire : sert aux relances
+    frequency: Literal["weekly", "monthly"]
+    installment_amount: float = Field(gt=0, le=MAX_MONEY)          # ce que le client paie à chaque échéance
+    down_payment: float = Field(default=0, ge=0, le=MAX_MONEY)     # acompte payé tout de suite
+    # Total que l'écran a affiché au client : si les réglages ont changé entre-temps, la vente est refusée (409).
+    expected_total_due: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
+    # Mot de passe du propriétaire, seulement si la limite de dette du client est dépassée et que le vendeur est un caissier.
+    owner_password: Optional[str] = Field(default=None, max_length=72)
+
+    @field_validator("customer_name", "customer_id_number")
+    @classmethod
+    def _strip_required(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if len(v) < 2:
+            raise ValueError("champ trop court")
+        return v
+
+    @field_validator("customer_phone")
+    @classmethod
+    def _check_phone(cls, v: str) -> str:
+        v = v.strip()
+        if sum(ch.isdigit() for ch in v) < 6:
+            raise ValueError("numéro de téléphone invalide")
+        return v
+
+
+class CreditPaymentIn(BaseModel):
+    amount: float = Field(gt=0, le=MAX_MONEY)
+    note: Optional[str] = Field(default=None, max_length=200)
+    # Même identifiant = même paiement (double clic, coupure réseau) : enregistré une seule fois.
+    client_payment_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
+
+
 class SaleCreateIn(BaseModel):
     items: List[SaleLineIn] = Field(min_length=1, max_length=100)
-    payment_method: Literal["cash", "mobile_money", "card", "other"]
+    payment_method: Literal["cash", "mobile_money", "card", "other", "credit"]
     amount_received: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
     # Identifiant unique de la tentative de paiement, créé une fois côté caisse. Même identifiant = même vente.
     client_sale_id: Optional[str] = Field(default=None, min_length=8, max_length=64)
+    credit: Optional[CreditIn] = None
+
+    @model_validator(mode="after")
+    def _credit_form(self):
+        if self.payment_method == "credit" and self.credit is None:
+            raise ValueError("le formulaire de crédit est obligatoire")
+        if self.payment_method != "credit" and self.credit is not None:
+            raise ValueError("le formulaire de crédit ne s'utilise qu'avec le paiement à crédit")
+        return self
 
 
 class CancelIn(BaseModel):
