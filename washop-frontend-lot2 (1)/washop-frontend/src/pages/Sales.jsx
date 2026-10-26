@@ -13,6 +13,7 @@ import { Button, ConfirmModal, Empty, Modal, SaleBadge, Spinner, cx } from "../c
 import { PageHeader } from "../components/Layout";
 import Receipt from "../components/Receipt";
 import { useMotifFlow } from "../components/useMotifFlow";
+import "../credit.css";
 
 const PAGE_SIZE = 20;
 
@@ -37,7 +38,7 @@ function SaleDetail({ sale, onCancelled, onClose }) {
     <div className="sale-detail">
       <div className="sale-detail-head">
         <div><span className="mono muted">{sale.number}</span><b className="num">{fc(sale.total)}</b></div>
-        <SaleBadge status={sale.status} />
+        <SaleBadge status={sale.status} credit={sale.payment_method === "credit"} />
         {onClose && <button type="button" className="icon-btn" aria-label="Fermer" onClick={onClose}><X size={18} /></button>}
       </div>
       <div className="muted">{sale.cashier_name || "—"} · {paymentLabel(sale.payment_method)} · {formatDateTime(sale.created_at)}</div>
@@ -47,6 +48,13 @@ function SaleDetail({ sale, onCancelled, onClose }) {
         ))}
       </div>
       {sale.change_given != null && <div className="line muted"><span>Reçu {fc(sale.amount_received)}</span><span>Monnaie {fc(sale.change_given)}</span></div>}
+      {sale.credit && (
+        <div className="receipt-credit">
+          <div className="line"><span>Vente à crédit · {sale.credit.customer_name}</span><b className="num">{fc(sale.credit.total_due)}</b></div>
+          <div className="line muted"><span>Acompte {fc(sale.credit.down_payment)}</span><span>Reste à la vente {fc(sale.credit.balance)}</span></div>
+          <div className="line muted"><span>Le suivi et les remboursements sont dans l'onglet Crédits.</span></div>
+        </div>
+      )}
       <div className="section-label">Journal de la vente</div>
       <ol className="timeline">
         <li><i className="dot-green" /><span><b>Vente créée</b> · {sale.cashier_name || "—"} · {formatDateTime(sale.created_at)}</span></li>
@@ -116,7 +124,7 @@ export default function Sales() {
             <td>{s.cashier_name || "—"}</td>
             <td className="muted">—</td>
             <td className="r num strong">{fc(s.total)}</td>
-            <td><SaleBadge status={s.status} /></td>
+            <td><SaleBadge status={s.status} credit={s.payment_method === "credit"} /></td>
           </tr>
         ))}
       </tbody>
@@ -126,7 +134,7 @@ export default function Sales() {
       {data.items.map((s) => (
         <button key={s.id} type="button" className="row" onClick={() => setSelected(s)}>
           <div className="row-main"><strong>{s.cashier_name || "—"}</strong><span><span className="mono">{s.number}</span> · {formatDateTime(s.created_at)}</span></div>
-          <div className="row-end"><b className="num">{fc(s.total)}</b><SaleBadge status={s.status} /></div>
+          <div className="row-end"><b className="num">{fc(s.total)}</b><SaleBadge status={s.status} credit={s.payment_method === "credit"} /></div>
         </button>
       ))}
     </div>
@@ -176,7 +184,7 @@ export function MySales() {
           <Receipt sale={sale} business={auth.business} />
           <div className="receipt-actions">
             <Button kind="ghost" icon={FileText} onClick={() => openBlob("GET", `/sales/${sale.id}/invoice`).catch((e) => toast.push(errorText(e), "error"))}>Facture PDF</Button>
-            {sale.status === "completed" && (
+            {sale.status === "completed" && sale.payment_method !== "credit" && (
               <Button kind="danger" icon={Ban} onClick={() => motif.start({
                 title: "Pourquoi annuler cette vente ?",
                 subtitle: `${sale.number} · ${fc(sale.total)}`,
