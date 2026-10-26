@@ -9,12 +9,15 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from ..db import get_db, run_transaction
+from ..errors import AppError
 from ..schemas import CancelIn, SaleCreateIn, sale_out
-from ..security import get_current_user
+from ..security import DEFAULT_SETTINGS, get_current_user, verify_password
+from ..services import credit as credit_rules
 from ..services.audit import audit_entry, check_motif, write_audit
+from ..services.rate_limit import clear_hits, enforce_limit, record_hits
 from ..services.pdf import invoice_pdf
 from ..services.stock import apply_stock_delta, build_movement, start_of_day, utcnow
-from ..services.timezones import business_tz, local_midnight_utc
+from ..services.timezones import business_tz, local_midnight_utc, local_today, tz_of
 
 router = APIRouter(tags=["sales"])
 
@@ -46,6 +49,24 @@ async def _visible_sale(db, user: dict, sale_id: str) -> dict:
 
 async def _sale_by_client_id(db, business_id: str, client_sale_id: str) -> dict | None:
     return await db.sales.find_one({"business_id": business_id, "client_sale_id": client_sale_id}, {"_id": 0})
+
+
+async def _authorize_owner(db, business_id: str, user_id: str, password: str, session) -> dict:
+    """
+    Dette maximale dépassée : le propriétaire valide en tapant son mot de passe sur la caisse du caissier.
+    5 essais ratés par quart d'heure et par caissier, ensuite la porte se ferme (même règle que la connexion).
+    """
+    key = f"credit_override:{user_id}"
+    await enforce_limit(db, "login_attempts", key, 5, 15 * 60, "Trop d'essais. Réessaie dans quelques minutes.")
+    owners = await db.users.find(
+        {"business_id": business_id, "role": "owner", "is_active": True}, {"_id": 0}, session=session
+    ).to_list(10)
+    for owner in owners:
+        if verify_password(password, owner["password_hash"]):
+            await clear_hits(db, "login_attempts", key)
+            return owner
+    await record_hits(db, "login_attempts", [key])  # hors transaction : l'essai raté reste compté
+    raise AppError(400, "Mot de passe du propriétaire incorrect.", code="OWNER_PASSWORD_INVALID")
 
 
 async def _insert_movements(db, session, movements: list[dict]) -> None:
@@ -129,11 +150,78 @@ async def create_sale(body: SaleCreateIn, user: dict = Depends(get_current_user)
                 "line_total": float(line_total),
                 "code": scanned.get(product_id) or product.get("code") or product.get("qr_code"),  # code scanné
             })
-        profit = total - total_cost
+        subtotal = total  # total des articles, avant les intérêts d'un éventuel crédit
+
+        # Vente à crédit : les intérêts, l'acompte minimum et l'échéancier sont calculés ICI, jamais par l'écran.
+        terms = None
+        credit_id = None
+        id_key = None
+        limit_override = None
+        if body.payment_method == "credit":
+            business = await db.businesses.find_one(
+                {"id": business_id}, {"_id": 0, "settings": 1, "currency": 1, "timezone": 1}, session=session
+            ) or {}
+            cfg = {**DEFAULT_SETTINGS, **(business.get("settings") or {})}
+            if not cfg.get("credit_enabled", True):
+                raise HTTPException(400, "La vente à crédit n'est pas activée dans cette boutique.")
+            form = body.credit
+            try:
+                terms = credit_rules.compute_terms(
+                    subtotal=subtotal,
+                    interest_percent=cfg.get("credit_interest_percent", 0),
+                    min_down_percent=cfg.get("credit_min_down_percent", 0),
+                    down_payment=form.down_payment,
+                    installment_amount=form.installment_amount,
+                    frequency=form.frequency,
+                    start=local_today(tz_of(business)),
+                    currency=business.get("currency") or "FC",
+                )
+            except credit_rules.CreditError as exc:
+                raise HTTPException(400, str(exc))
+            if form.expected_total_due is not None and abs(Decimal(str(form.expected_total_due)) - Decimal(str(terms["total_due"]))) > CENT:
+                raise HTTPException(
+                    409,
+                    "Les conditions du crédit ont changé (intérêts). Vérifie le nouveau total puis valide à nouveau.",
+                )
+            currency = business.get("currency") or "FC"
+            id_key = credit_rules.id_key(form.customer_id_number)
+            if len(id_key) < 3:
+                raise HTTPException(400, "Numéro de pièce d'identité invalide.")
+            # Limite de dette par client (même numéro de pièce d'identité), fixée par le propriétaire. 0 = pas de limite.
+            limit_override = None
+            max_debt = Decimal(str(cfg.get("credit_max_debt") or 0))
+            if max_debt > 0:
+                rows = await db.credits.aggregate(
+                    [{"$match": {"business_id": business_id, "customer_id_key": id_key, "status": "open"}},
+                     {"$group": {"_id": None, "debt": {"$sum": "$balance"}}}],
+                    session=session,
+                ).to_list(1)
+                current_debt = Decimal(str(rows[0]["debt"])) if rows else Decimal("0")
+                new_debt = current_debt + Decimal(str(terms["balance"]))
+                if new_debt > max_debt:
+                    over = {"current_debt": float(current_debt), "new_debt": float(new_debt), "max_debt": float(max_debt)}
+                    if user["role"] == "owner":
+                        authorizer = user
+                    elif not form.owner_password:
+                        raise AppError(
+                            409,
+                            f"Limite de crédit dépassée : ce client doit déjà {credit_rules.fmt_money(current_debt, currency)}, "
+                            f"ce crédit porterait sa dette à {credit_rules.fmt_money(new_debt, currency)} "
+                            f"(maximum {credit_rules.fmt_money(max_debt, currency)}). Le propriétaire doit valider.",
+                            code="CREDIT_LIMIT", **over,
+                        )
+                    else:
+                        authorizer = await _authorize_owner(db, business_id, user["id"], form.owner_password, session)
+                    limit_override = {**over, "authorized_by": authorizer["id"], "authorized_by_name": authorizer.get("name")}
+            total = Decimal(str(terms["total_due"]))  # le client doit rembourser articles + intérêts
+            credit_id = str(uuid.uuid4())
+        profit = total - total_cost  # les intérêts comptent dans le bénéfice
 
         change = None
         received = body.amount_received
-        if body.payment_method == "cash" and received is not None:
+        if terms is not None:
+            received = terms["down_payment"]  # ce qui est payé tout de suite
+        elif body.payment_method == "cash" and received is not None:
             if Decimal(str(received)) < total:
                 raise HTTPException(400, "Le montant reçu est inférieur au total de la vente.")
             change = float((Decimal(str(received)) - total).quantize(CENT, ROUND_HALF_UP))
@@ -169,9 +257,64 @@ async def create_sale(body: SaleCreateIn, user: dict = Depends(get_current_user)
             "session_id": user.get("session_id"),
             "device_type": user.get("device_type"),
             "customer_id": None,  # fiches clients : lot suivant
+            "credit_id": credit_id,
+            # Copie des conditions au moment de la vente (le reçu ne change jamais). Sans numéro de pièce d'identité.
+            "credit": None if terms is None else {
+                "customer_name": body.credit.customer_name,
+                "subtotal": terms["subtotal"],
+                "interest_percent": terms["interest_percent"],
+                "interest_amount": terms["interest_amount"],
+                "total_due": terms["total_due"],
+                "down_payment": terms["down_payment"],
+                "balance": terms["balance"],
+                "frequency": terms["frequency"],
+                "installment_amount": terms["installment_amount"],
+                "installments_count": terms["installments_count"],
+                "first_due_date": terms["first_due_date"],
+                "last_due_date": terms["last_due_date"],
+            },
             "created_at": now,
         }
         await db.sales.insert_one(sale, session=session)
+        if terms is not None:
+            await db.credits.insert_one({
+                "id": credit_id,
+                "business_id": business_id,
+                "sale_id": sale_id,
+                "sale_number": sale["number"],
+                "customer_name": body.credit.customer_name,
+                "customer_id_number": body.credit.customer_id_number,
+                "customer_id_key": id_key,
+                "customer_phone": body.credit.customer_phone,
+                "limit_override": limit_override,
+                "subtotal": terms["subtotal"],
+                "interest_percent": terms["interest_percent"],
+                "interest_amount": terms["interest_amount"],
+                "total_due": terms["total_due"],
+                "down_payment": terms["down_payment"],
+                "balance": terms["balance"],
+                "frequency": terms["frequency"],
+                "installment_amount": terms["installment_amount"],
+                "installments_count": terms["installments_count"],
+                "schedule": terms["schedule"],
+                "payments": [],
+                "status": "open",
+                "created_at": now,
+                "updated_at": now,
+                "created_by": user["id"],
+                "cashier_name": user.get("name"),
+            }, session=session)
+            if limit_override:
+                await write_audit(db, audit_entry(
+                    user, "credit_limit_override", "credit", credit_id,
+                    new_value={"customer_name": body.credit.customer_name, "sale_number": sale["number"], **limit_override},
+                ), session=session)
+            await write_audit(db, audit_entry(
+                user, "credit_created", "credit", credit_id,
+                new_value={"customer_name": body.credit.customer_name, "sale_number": sale["number"],
+                           "total_due": terms["total_due"], "down_payment": terms["down_payment"],
+                           "balance": terms["balance"]},
+            ), session=session)
 
         movements = [
             build_movement(
@@ -272,6 +415,19 @@ async def cancel_sale(
             if exists is None:
                 raise HTTPException(404, "Vente introuvable.")
             raise HTTPException(409, "Cette vente est déjà annulée.")
+
+        if sale.get("payment_method") == "credit":
+            # Annuler une vente à crédit : propriétaire seulement, et seulement tant que le client n'a rien remboursé.
+            if user["role"] != "owner":
+                raise HTTPException(403, "Seul le propriétaire peut annuler une vente à crédit.")
+            credit = await db.credits.find_one({"id": sale.get("credit_id"), "business_id": business_id}, {"_id": 0, "payments": 1}, session=session)
+            if credit and credit.get("payments"):
+                raise HTTPException(409, "Impossible d'annuler : le client a déjà remboursé une partie de ce crédit.")
+            await db.credits.update_one(
+                {"id": sale.get("credit_id"), "business_id": business_id},
+                {"$set": {"status": "cancelled", "updated_at": utcnow()}},
+                session=session,
+            )
 
         movements = []
         for line in sale["items"]:
