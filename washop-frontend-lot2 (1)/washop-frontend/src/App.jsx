@@ -17,6 +17,7 @@ import Sales, { MySales } from "./pages/Sales";
 import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import Audit from "./pages/Audit";
+import Credits from "./pages/Credits";
 import Settings from "./pages/Settings";
 import More from "./pages/More";
 
@@ -39,6 +40,7 @@ function resolve(path) {
   if (path === "/stock") return <Stock />;
   if (path === "/ventes") return <Sales />;
   if (path === "/mes-ventes") return <MySales />;
+  if (path === "/credits") return <Credits />;
   if (path === "/dashboard") return <Dashboard />;
   if (path === "/utilisateurs") return <Users />;
   if (path === "/journal") return <Audit />;
