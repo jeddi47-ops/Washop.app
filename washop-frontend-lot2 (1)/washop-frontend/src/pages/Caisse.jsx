@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, FileText, Plus, Repeat, ScanLine, Search, Smartphone, Trash2, WifiOff, X } from "lucide-react";
+import { Ban, FileText, Pencil, Plus, Repeat, ScanLine, Search, Smartphone, Trash2, WifiOff, X } from "lucide-react";
 import { api, openBlob } from "../lib/api";
 import { fc, parseNumber } from "../lib/format";
 import { PAYMENT_METHODS } from "../lib/labels";
+import { creditSettings, frequencyLabel, fmtDay, previewCredit } from "../lib/credit";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
 import { newId } from "../lib/ids";
 import { useRouter } from "../lib/router";
@@ -16,6 +17,9 @@ import { Button, Segmented, Stepper, Thumb, cx } from "../components/ui";
 import CameraScanner from "../components/CameraScanner";
 import Receipt from "../components/Receipt";
 import { useMotifFlow } from "../components/useMotifFlow";
+import CreditModal, { creditProblem, termsInputs } from "../components/CreditModal";
+import OwnerAuthModal from "../components/OwnerAuthModal";
+import "../credit.css";
 
 const looksLikeCode = (s) => /^[A-Za-z0-9_\-]{4,}$/.test(s) && /\d|_/.test(s);
 
@@ -73,7 +77,20 @@ export default function Caisse() {
   const [sale, setSale] = useState(null);
   const [switching, setSwitching] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [creditForm, setCreditForm] = useState(null); // saisie du formulaire de crédit (le serveur recalcule tout à la validation)
+  const [creditOpen, setCreditOpen] = useState(false);
+  const [ownerAuth, setOwnerAuth] = useState(null); // { info, error } : limite de dette dépassée, mot de passe du propriétaire demandé
   const searchRef = useRef(null);
+
+  const credit = creditSettings(auth.business);
+  const methods = credit.credit_enabled ? PAYMENT_METHODS : PAYMENT_METHODS.filter((m) => m.code !== "credit");
+  // Aperçu recalculé avec le panier ACTUEL : si le caissier ajoute un article après avoir rempli le formulaire, tout suit.
+  const creditPreview = useMemo(
+    () => (method === "credit" && creditForm ? previewCredit(cart.total, credit, termsInputs(creditForm.terms), auth.business?.timezone) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [method, creditForm, cart.total, auth.business],
+  );
+  const creditIssue = method === "credit" ? (creditForm && creditPreview ? creditProblem(creditForm, creditPreview) : "Remplis le formulaire du crédit.") : null;
 
   const unknown = localUnknown || live.unknownCode;
   const clearUnknown = () => { setLocalUnknown(null); live.setUnknownCode(null); };
@@ -122,10 +139,15 @@ export default function Caisse() {
   const receivedNum = parseNumber(received);
   const change = method === "cash" && Number.isFinite(receivedNum) ? receivedNum - cart.total : null;
 
-  async function pay() {
+  async function pay(ownerPassword) {
     if (!cart.lines.length || paying || cart.attempt?.uncertain) return;
     if (method === "cash" && Number.isFinite(receivedNum) && receivedNum < cart.total) {
       setPayError({ text: "Le montant reçu est inférieur au total." });
+      return;
+    }
+    if (method === "credit" && creditIssue) {
+      if (!creditForm) setCreditOpen(true);
+      else setPayError({ text: creditIssue });
       return;
     }
     // Un identifiant par tentative : créé une fois au clic, gardé avec le panier, renvoyé tel quel.
@@ -139,17 +161,37 @@ export default function Caisse() {
         items: cart.lines.map((l) => ({ product_id: l.product.id, quantity: l.qty, ...(l.code ? { scanned_code: l.code } : {}) })),
         payment_method: method,
         ...(method === "cash" && Number.isFinite(receivedNum) ? { amount_received: receivedNum } : {}),
+        ...(method === "credit" ? {
+          credit: {
+            customer_name: creditForm.name.trim(),
+            customer_id_number: creditForm.idNumber.trim(),
+            customer_phone: creditForm.phone.trim(),
+            frequency: creditForm.terms.frequency,
+            installment_amount: creditPreview.installment,
+            down_payment: creditPreview.down,
+            expected_total_due: creditPreview.totalDue,
+            ...(ownerPassword ? { owner_password: ownerPassword } : {}),
+          },
+        } : {}),
       };
       const created = await api.post("/sales", body);
       cart.clear();
       setReceived("");
+      setCreditForm(null);
+      setOwnerAuth(null);
+      if (method === "credit") setMethod("cash");
       setSale(created);
       reload(); // stocks à jour
     } catch (e) {
       if (e.status === 0) {
         // Coupure pendant l'envoi : on ne sait pas si la vente est passée. Aucun renvoi, ni automatique ni manuel.
         cart.setAttempt({ ...attempt, uncertain: true });
+      } else if (e.code === "CREDIT_LIMIT") {
+        setOwnerAuth({ info: e.data, error: null }); // le propriétaire doit valider avec son mot de passe
+      } else if (e.code === "OWNER_PASSWORD_INVALID") {
+        setOwnerAuth((a) => ({ info: a?.info || null, error: e.detail }));
       } else {
+        setOwnerAuth(null);
         setPayError({ text: errorText(e) });
       }
     } finally {
@@ -192,7 +234,7 @@ export default function Caisse() {
         <Receipt sale={sale} business={auth.business} />
         <div className="receipt-actions">
           <Button kind="white" icon={FileText} onClick={() => openBlob("GET", `/sales/${sale.id}/invoice`).catch((e) => toast.push(errorText(e), "error"))}>Facture PDF</Button>
-          {sale.status === "completed" && <Button kind="danger" icon={Ban} onClick={askCancel}>Annuler la vente</Button>}
+          {sale.status === "completed" && (auth.user.role === "owner" || sale.payment_method !== "credit") && <Button kind="danger" icon={Ban} onClick={askCancel}>Annuler la vente</Button>}
           <Button icon={Plus} className="grow" onClick={() => setSale(null)}>Nouvelle vente</Button>
         </div>
         {motif.modal}
@@ -245,14 +287,46 @@ export default function Caisse() {
   const isOwner = auth.user.role === "owner";
   const payment = (
     <div className="pay-box">
-      <Segmented options={PAYMENT_METHODS} value={method} onChange={(m) => { setMethod(m); setPayError(null); }} />
+      <Segmented className={methods.length > 3 ? "segmented-4" : ""} options={methods} value={method} onChange={(m) => { setMethod(m); setPayError(null); if (m === "credit") setCreditOpen(true); }} />
       {method === "cash" && (
         <div className="cash-row">
           <input inputMode="decimal" placeholder="Montant reçu (facultatif)" value={received} onChange={(e) => setReceived(e.target.value)} aria-label="Montant reçu" />
           {change !== null && change >= 0 && <span className="change">Monnaie : <b className="num">{fc(change)}</b></span>}
         </div>
       )}
-      <div className="total-row"><span>Total</span><b className="num">{fc(cart.total)}</b></div>
+      {method === "credit" && (
+        <div className="credit-box">
+          {creditForm && creditPreview && !creditPreview.error && !creditPreview.incomplete ? (
+            <>
+              <div className="credit-box-head">
+                <strong>{creditForm.name.trim() || "Client"}</strong>
+                <Button kind="ghost" size="sm" icon={Pencil} onClick={() => setCreditOpen(true)}>Modifier</Button>
+              </div>
+              {creditPreview.interest > 0 && (
+                <div className="credit-line"><span>dont intérêts ({String(creditPreview.pct).replace(".", ",")} %)</span><b className="num">{fc(creditPreview.interest)}</b></div>
+              )}
+              <div className="credit-line"><span>Acompte maintenant</span><b className="num">{fc(creditPreview.down)}</b></div>
+              <div className="credit-line big"><span>Reste à payer</span><b className="num">{fc(creditPreview.balance)}</b></div>
+              <div className="credit-terms">
+                {creditPreview.count} versement{creditPreview.count > 1 ? "s" : ""} de {fc(creditPreview.installment)} {frequencyLabel(creditForm.terms.frequency)} · premier le {fmtDay(creditPreview.first)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="credit-box-head">
+                <strong>Vente à crédit</strong>
+                <Button kind="soft" size="sm" onClick={() => setCreditOpen(true)}>{creditForm ? "Corriger le formulaire" : "Remplir le formulaire"}</Button>
+              </div>
+              {creditForm && creditIssue && <div className="credit-error" role="alert">{creditIssue}</div>}
+            </>
+          )}
+        </div>
+      )}
+      {method === "credit" && creditPreview && !creditPreview.error ? (
+        <div className="total-row"><span>Total à rembourser</span><b className="num">{fc(creditPreview.totalDue)}</b></div>
+      ) : (
+        <div className="total-row"><span>{method === "credit" ? "Total des articles" : "Total"}</span><b className="num">{fc(cart.total)}</b></div>
+      )}
       {payError && (
         <div className="pay-error" role="alert">
           <Ban size={18} />
@@ -274,7 +348,7 @@ export default function Caisse() {
           </div>
         </>
       ) : (
-        <Button className="btn-block btn-xl" loading={paying} disabled={!cart.lines.length} onClick={pay}>Payer</Button>
+        <Button className="btn-block btn-xl" loading={paying} disabled={!cart.lines.length} onClick={() => pay()}>{method === "credit" ? "Valider le crédit" : "Payer"}</Button>
       )}
     </div>
   );
@@ -283,6 +357,26 @@ export default function Caisse() {
     <div className="cart-list">{cart.lines.map((l) => <CartLine key={l.product.id} line={l} />)}</div>
   ) : (
     <div className="cart-empty">Scanne un produit ou touche-le dans l'accès rapide.</div>
+  );
+
+  const creditModals = (
+    <>
+      <CreditModal
+        open={creditOpen}
+        onClose={() => { setCreditOpen(false); if (!creditForm) setMethod("cash"); }}
+        subtotal={cart.total}
+        initial={creditForm}
+        onSave={(form) => { setCreditForm(form); setCreditOpen(false); setPayError(null); }}
+      />
+      <OwnerAuthModal
+        open={Boolean(ownerAuth)}
+        info={ownerAuth?.info}
+        error={ownerAuth?.error}
+        loading={paying}
+        onClose={() => setOwnerAuth(null)}
+        onConfirm={(password) => pay(password)}
+      />
+    </>
   );
 
   const cameraOverlay = camera && (
@@ -318,6 +412,7 @@ export default function Caisse() {
           {payment}
         </aside>
         {cameraOverlay}
+        {creditModals}
       </div>
     );
   }
@@ -342,6 +437,7 @@ export default function Caisse() {
       </div>
       <div className="caisse-phone-pay">{payment}</div>
       {cameraOverlay}
+      {creditModals}
     </div>
   );
 }
