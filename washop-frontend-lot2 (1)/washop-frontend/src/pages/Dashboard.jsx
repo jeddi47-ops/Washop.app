@@ -1,6 +1,6 @@
 // Tableau de bord : propriétaire uniquement. Pas de bannière, le contenu utile commence tout de suite.
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ScanLine, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, ChevronRight, ScanLine, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { api } from "../lib/api";
 import { addDays, fc, formatDayLong, formatTime, qty, todayIn } from "../lib/format";
 import { useRouter } from "../lib/router";
@@ -9,6 +9,7 @@ import { useAuth } from "../state/auth";
 import { errorText, useToast } from "../state/toast";
 import { Button, SaleBadge, Thumb, cx } from "../components/ui";
 import { PageHeader } from "../components/Layout";
+import "../credit.css";
 
 const PERIODS = [{ code: 7, label: "7 jours" }, { code: 30, label: "30 jours" }];
 const DAY_ABBR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
@@ -48,6 +49,7 @@ export default function Dashboard() {
   const [series, setSeries] = useState(null);
   const [top, setTop] = useState(null);
   const [recent, setRecent] = useState(null);
+  const [credits, setCredits] = useState(null);
 
   useEffect(() => {
     const fail = (e) => toast.push(errorText(e), "error");
@@ -56,6 +58,7 @@ export default function Dashboard() {
     api.get("/stats/top-products", { query: { period: "today", limit: 100 } })
       .then((r) => setSoldToday(r.top_products.reduce((s, p) => s + p.quantity_sold, 0))).catch(fail);
     api.get("/alerts").then((r) => setLowStock(r.low_stock.length)).catch(fail);
+    api.get("/credits/summary").then(setCredits).catch(() => {}); // facultatif : le tableau de bord marche sans
     api.get("/sales", { query: { page_size: 5 } }).then((r) => setRecent(r.items)).catch(fail);
   }, [toast]);
 
@@ -84,10 +87,21 @@ export default function Dashboard() {
         sub={`${formatDayLong()} · ${auth.business?.name || ""}`}
         actions={desktop && <Button icon={ScanLine} onClick={() => navigate("/caisse")}>Ouvrir la caisse</Button>}
       />
+      {credits?.late_count > 0 && (
+        <button type="button" className="credit-alert" onClick={() => navigate("/credits", { state: { filter: "late" } })}>
+          <Wallet size={22} />
+          <span className="grow">
+            <strong>{credits.late_count} client{credits.late_count > 1 ? "s" : ""} n'{credits.late_count > 1 ? "ont" : "a"} pas payé à temps</strong>
+            <span>{fc(credits.overdue_amount)} en retard · touche pour relancer</span>
+          </span>
+          <ChevronRight size={20} />
+        </button>
+      )}
       <div className="dash-cards">
         <div className="hero-card">
           <span>Ventes du jour</span>
           <b className="num">{summary ? fc(summary.revenue) : "…"}</b>
+          {credits?.credit_today > 0 && <small className="credit-hero-note">dont {fc(credits.credit_today)} à crédit, pas encore encaissé</small>}
           {change != null && (
             <em>{change >= 0 ? <TrendingUp size={15} /> : <TrendingDown size={15} />} {change >= 0 ? "+" : ""}{String(change).replace(".", ",")} % vs hier</em>
           )}
