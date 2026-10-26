@@ -1,4 +1,4 @@
-import { Boxes, Home, LayoutDashboard, LogOut, MoreHorizontal, Package, Receipt, ScanLine, ScrollText, Settings, Users } from "lucide-react";
+import { Boxes, Home, LayoutDashboard, LogOut, MoreHorizontal, Package, Receipt, ScanLine, ScrollText, Settings, Users, Wallet } from "lucide-react";
 import { Link, useRouter } from "../lib/router";
 import { useAuth } from "../state/auth";
 import { useIsDesktop } from "../lib/useMedia";
@@ -12,6 +12,7 @@ export const OWNER_NAV = [
   { to: "/produits", label: "Produits", icon: Package },
   { to: "/stock", label: "Stock", icon: Boxes },
   { to: "/ventes", label: "Ventes", icon: Receipt },
+  { to: "/credits", label: "Crédits", icon: Wallet },
   { to: "/utilisateurs", label: "Utilisateurs", icon: Users },
   { to: "/journal", label: "Journal", icon: ScrollText },
   { to: "/parametres", label: "Paramètres", icon: Settings },
@@ -21,6 +22,7 @@ export const SELLER_NAV = [
   { to: "/produits", label: "Produits", icon: Package },
   { to: "/stock", label: "Stock", icon: Boxes },
   { to: "/mes-ventes", label: "Mes ventes", icon: Receipt },
+  { to: "/credits", label: "Crédits", icon: Wallet },
 ];
 
 const OWNER_TABS = [
