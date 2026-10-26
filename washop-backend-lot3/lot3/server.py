@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.db import close_db, connect_db, create_indexes, ensure_replica_set
 from app.errors import AppError
-from app.routers import alerts, audit, auth, business, products, sales, stats, users, ws
+from app.routers import alerts, audit, auth, business, credits, products, sales, stats, users, ws
 
 
 @asynccontextmanager
@@ -53,7 +53,7 @@ async def app_error_handler(request: Request, exc: AppError):
     return JSONResponse(status_code=exc.status_code, content=exc.body(), headers=exc.headers)
 
 
-for module in (auth, business, products, sales, stats, alerts, users, audit, ws):
+for module in (auth, business, products, sales, credits, stats, alerts, users, audit, ws):
     app.include_router(module.router, prefix="/api")
 
 
