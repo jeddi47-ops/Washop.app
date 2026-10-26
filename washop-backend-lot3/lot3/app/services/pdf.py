@@ -10,7 +10,7 @@ from reportlab.pdfgen import canvas
 
 from .timezones import tz_of
 
-PAYMENT_LABELS = {"cash": "Espèces", "mobile_money": "Mobile money", "card": "Carte", "other": "Autre"}
+PAYMENT_LABELS = {"cash": "Espèces", "mobile_money": "Mobile money", "card": "Carte", "other": "Autre", "credit": "Crédit"}
 
 
 def money(value) -> str:
@@ -78,9 +78,33 @@ def invoice_pdf(business: dict, sale: dict) -> bytes:
         c.drawRightString(150 * mm, y, money(item["unit_price"]))
         c.drawRightString(width - 20 * mm, y, money(item["line_total"]))
 
+    credit = sale.get("credit")
+    if credit:
+        # Vente à crédit : détail des intérêts, de l'acompte et de l'échéancier (sans numéro de pièce d'identité).
+        c.setFont("Helvetica", 10)
+        y -= 8 * mm
+        c.drawRightString(width - 20 * mm, y, f"Sous-total : {money(credit['subtotal'])}")
+        if credit["interest_amount"]:
+            y -= 5 * mm
+            pct = f"{credit['interest_percent']:g}".replace(".", ",")
+            c.drawRightString(width - 20 * mm, y, f"Intérêts ({pct} %) : {money(credit['interest_amount'])}")
     y -= 10 * mm
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(width - 20 * mm, y, f"Total : {money(sale['total'])}")
+
+    if credit:
+        c.setFont("Helvetica", 10)
+        rhythm = "par semaine" if credit["frequency"] == "weekly" else "par mois"
+        first = dt.date.fromisoformat(credit["first_due_date"]).strftime("%d/%m/%Y")
+        lines = [
+            f"Client : {credit['customer_name']}",
+            f"Acompte payé : {money(credit['down_payment'])}",
+            f"Reste à payer : {money(credit['balance'])}",
+            f"{credit['installments_count']} paiement(s) de {money(credit['installment_amount'])} {rhythm}, le premier le {first}",
+        ]
+        for text in lines:
+            y -= 6 * mm
+            c.drawString(20 * mm, y, text[:110])
 
     footer = business.get("invoice_footer")
     if footer:
