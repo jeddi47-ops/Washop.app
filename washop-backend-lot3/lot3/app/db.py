@@ -86,6 +86,10 @@ async def create_indexes(db: AsyncIOMotorDatabase) -> None:
                         partialFilterExpression={"client_sale_id": {"$type": "string"}})
     await _ensure_index(db.sales, [("business_id", 1), ("created_by", 1), ("created_at", -1)])
     await _ensure_index(db.stock_movements, [("business_id", 1), ("product_id", 1), ("created_at", 1)])
+    await _ensure_index(db.stock_movements, [("business_id", 1), ("type", 1), ("created_at", 1)])
+    # Fonds de réappro : départs et ajustements
+    await _ensure_index(db.fund_entries, "id", unique=True)
+    await _ensure_index(db.fund_entries, [("business_id", 1), ("type", 1), ("created_at", -1)])
     # Crédits clients : un crédit par vente ; recherche par statut puis par nom
     await _ensure_index(db.credits, "id", unique=True)
     await _ensure_index(db.credits, [("business_id", 1), ("sale_id", 1)], unique=True)
