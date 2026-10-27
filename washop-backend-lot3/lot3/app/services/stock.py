@@ -36,7 +36,7 @@ async def apply_stock_delta(db, business_id: str, product_id: str, delta: float,
 
 
 def build_movement(*, business_id, product_id, movement_type, quantity_change, quantity_after,
-                   created_by, reason=None, sale_id=None) -> dict:
+                   created_by, reason=None, sale_id=None, unit_cost=None) -> dict:
     """Règle 4.5 : toute modification de quantité passe par un mouvement."""
     return {
         "id": str(uuid.uuid4()),
@@ -47,6 +47,7 @@ def build_movement(*, business_id, product_id, movement_type, quantity_change, q
         "quantity_after": quantity_after,
         "reason": reason,
         "sale_id": sale_id,
+        "unit_cost": unit_cost,  # coût d'achat unitaire (réapprovisionnements) : sert au fonds de réappro
         "created_by": created_by,
         "created_at": utcnow(),
     }
