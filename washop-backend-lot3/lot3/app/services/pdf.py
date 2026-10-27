@@ -136,3 +136,85 @@ def qr_sheet_pdf(items: list[tuple[str, str]]) -> bytes:
     c.showPage()
     c.save()
     return buf.getvalue()
+
+
+def _plain_money(value, currency: str) -> str:
+    number = round(float(value or 0), 2)
+    body = f"{int(number):,}" if number == int(number) else f"{number:,.2f}"
+    return body.replace(",", " ").replace(".", ",") + f" {currency}"
+
+
+def purchase_order_pdf(business: dict, supplier: str | None, lines: list[dict], number: str, now: dt.datetime) -> bytes:
+    """
+    Bon de commande pour un fournisseur : produits, quantités, prix d'achat unitaires, total.
+    lines : {name, code, unit, quantity, unit_cost, line_total}. Plusieurs pages si la liste est longue.
+    """
+    currency = business.get("currency") or "FC"
+    zone = tz_of(business)
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    left, right = 20 * mm, width - 20 * mm
+
+    def header() -> float:
+        y = height - 20 * mm
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(left, y, business["name"])
+        y -= 6 * mm
+        c.setFont("Helvetica", 10)
+        for line in (business.get("address"), business.get("phone")):
+            if line:
+                c.drawString(left, y, line)
+                y -= 5 * mm
+        y -= 6 * mm
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left, y, f"Bon de commande {number}")
+        y -= 6 * mm
+        c.setFont("Helvetica", 10)
+        c.drawString(left, y, f"Date : {now.astimezone(zone):%d/%m/%Y}")
+        if supplier:
+            y -= 5 * mm
+            c.drawString(left, y, f"Fournisseur : {supplier[:80]}")
+        return y - 10 * mm
+
+    def columns(y: float) -> float:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(left, y, "Produit")
+        c.drawRightString(112 * mm, y, "Qté")
+        c.drawRightString(145 * mm, y, "Prix unit.")
+        c.drawRightString(right, y, "Total")
+        y -= 2 * mm
+        c.line(left, y, right, y)
+        c.setFont("Helvetica", 10)
+        return y
+
+    y = columns(header())
+    total = 0.0
+    for item in lines:
+        if y < 35 * mm:  # nouvelle page : on répète l'en-tête et les colonnes
+            c.showPage()
+            y = columns(header())
+        y -= 6 * mm
+        name = item["name"] if len(item["name"]) <= 46 else item["name"][:45] + "…"
+        c.drawString(left, y, name)
+        c.drawRightString(112 * mm, y, f"{item['quantity']:g}")
+        c.drawRightString(145 * mm, y, _plain_money(item["unit_cost"], currency))
+        c.drawRightString(right, y, _plain_money(item["line_total"], currency))
+        total += item["line_total"]
+
+    if y < 40 * mm:
+        c.showPage()
+        y = header()
+    y -= 4 * mm
+    c.line(left, y, right, y)
+    y -= 8 * mm
+    c.setFont("Helvetica-Bold", 12)
+    c.drawRightString(right, y, f"Total : {_plain_money(total, currency)}")
+    y -= 7 * mm
+    c.setFont("Helvetica", 9)
+    c.drawRightString(right, y, f"{len(lines)} produit(s) · prix d'achat indicatifs, à confirmer avec le fournisseur")
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(width / 2, 12 * mm, "Document généré par Washop")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
