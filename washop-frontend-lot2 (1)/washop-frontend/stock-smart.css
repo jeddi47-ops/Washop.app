@@ -1,0 +1,78 @@
+/* Stock intelligent : fonds de réappro, produits gagnants, à racheter.
+   Classes préfixées « ssm- » : aucun conflit avec styles.css (ancien thème comme refonte). */
+.ssm-stack { display: grid; gap: 16px; margin-bottom: 24px; }
+.ssm-h2 { font-size: 15px; margin: 8px 0 12px; }
+
+.ssm-card { background: var(--surface, #fff); border: 1px solid var(--line, #e4ebe7); border-radius: var(--radius, 16px); padding: 16px; min-width: 0; }
+.ssm-card h2 { display: flex; align-items: center; gap: 6px; font-size: 15px; margin: 0 0 2px; }
+.ssm-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 10px 16px; margin-bottom: 12px; }
+.ssm-head .muted { font-size: 13px; }
+
+/* Fonds + bénéfice */
+.ssm-fund-wrap { display: grid; gap: 10px; }
+.ssm-fund { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 560px) { .ssm-fund { grid-template-columns: 1fr 1fr; } }
+.ssm-card-fund { background: var(--mint, #e7f6ee); border-color: transparent; }
+.ssm-label { display: flex; align-items: center; gap: 6px; color: var(--muted, #5d6e66); font-size: 13px; font-weight: 600; }
+.ssm-big { display: block; font-size: 28px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; margin: 8px 0 6px; color: var(--ink, #13221b); }
+.ssm-sub { display: block; font-size: 13px; color: var(--muted, #5d6e66); }
+.ssm-fund-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; font-size: 13px; }
+.ssm-links { display: flex; gap: 14px; }
+.ssm-links .link { display: inline-flex; align-items: center; gap: 4px; }
+.ssm-details { font-size: 13px; }
+.ssm-details summary { cursor: pointer; color: var(--muted, #5d6e66); font-weight: 600; width: fit-content; }
+.ssm-details dl { margin: 10px 0; display: grid; gap: 6px; }
+.ssm-details dl > div { display: flex; justify-content: space-between; gap: 12px; }
+.ssm-details dt { color: var(--ink-2, #3a433e); }
+.ssm-details dd { margin: 0; font-weight: 600; white-space: nowrap; }
+.ssm-total { border-top: 1px solid var(--line, #e4ebe7); padding-top: 6px; font-weight: 700; }
+.ssm-entries { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.ssm-entries li { display: flex; justify-content: space-between; gap: 12px; }
+.ssm-start { display: grid; gap: 6px; }
+.ssm-start-title { font-size: 16px; }
+.ssm-start-row { display: grid; gap: 10px; align-items: end; }
+@media (min-width: 640px) { .ssm-start-row { grid-template-columns: minmax(0, 1fr) auto; } }
+.ssm-modal-text { font-size: 14px; margin: 0 0 12px; }
+.ssm-field { margin-top: 12px; display: grid; }
+
+/* Gagnants */
+.ssm-winners { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ssm-winners li { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; overflow: hidden; }
+.ssm-meter { position: absolute; inset: 0 auto 0 0; background: var(--mint, #e7f6ee); border-radius: 10px; z-index: 0; }
+.ssm-winners li > *:not(.ssm-meter) { position: relative; z-index: 1; }
+.ssm-rank { width: 18px; text-align: center; font-weight: 700; color: var(--muted, #5d6e66); font-variant-numeric: tabular-nums; }
+.ssm-grow { flex: 1; min-width: 0; display: grid; }
+.ssm-grow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssm-grow .muted { font-size: 12px; }
+.ssm-dormant { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line, #e4ebe7); }
+.ssm-dormant h3 { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 0 0 8px; color: var(--muted, #5d6e66); }
+.ssm-dormant ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.ssm-dormant li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
+
+/* À racheter */
+.ssm-note { font-size: 13px; background: var(--tile, #f4f7f5); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+.ssm-note-warn { background: var(--yellow-bg, #fff0c2); color: var(--yellow-ink, #7a5600); }
+.ssm-lines { list-style: none; margin: 0; padding: 0; display: grid; }
+.ssm-line { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "check product total" ". stock stock" ". qty qty"; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line, #e4ebe7); }
+.ssm-line:first-child { border-top: 0; }
+.ssm-line.off { opacity: 0.55; }
+.ssm-check { grid-area: check; width: 20px; height: 20px; accent-color: var(--accent, #12945a); }
+.ssm-product { grid-area: product; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ssm-product > div { display: grid; min-width: 0; }
+.ssm-product strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssm-product .muted { font-size: 12px; }
+.ssm-stockinfo { grid-area: stock; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; }
+.ssm-qty { grid-area: qty; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.ssm-short { font-size: 12px; color: var(--yellow-ink, #7a5600); }
+.ssm-linetotal { grid-area: total; text-align: right; }
+@media (min-width: 900px) {
+  .ssm-line { grid-template-columns: 22px minmax(180px, 1.4fr) minmax(170px, 1fr) minmax(150px, auto) 120px; grid-template-areas: "check product stock qty total"; }
+  .ssm-stockinfo { display: grid; gap: 2px; }
+  .ssm-qty { display: grid; gap: 4px; justify-items: start; }
+}
+.ssm-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 20px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line, #e4ebe7); }
+.ssm-summary > div:first-child { display: grid; gap: 2px; }
+.ssm-sum-total { font-size: 24px; letter-spacing: -0.02em; }
+.ssm-left { font-size: 13px; color: var(--muted, #5d6e66); }
+.ssm-pdfs { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 559px) { .ssm-pdfs { width: 100%; } .ssm-pdfs .btn { flex: 1 1 100%; } }
