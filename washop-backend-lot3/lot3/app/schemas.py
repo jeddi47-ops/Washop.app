@@ -123,6 +123,7 @@ class ProductCreate(BaseModel):
     unit: str = Field(default="pièce", max_length=20)
     sale_price: float = Field(ge=0, le=MAX_MONEY)
     purchase_price: float = Field(default=0, ge=0, le=MAX_MONEY)
+    supplier: Optional[str] = Field(default=None, max_length=80)  # fournisseur habituel (propriétaire seulement)
     initial_quantity: float = Field(default=0, ge=0, le=MAX_MONEY)
     low_stock_threshold: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
     expiry_date: Optional[date] = None
@@ -156,6 +157,7 @@ class ProductUpdate(BaseModel):
     unit: Optional[str] = Field(default=None, max_length=20)
     sale_price: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
     purchase_price: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
+    supplier: Optional[str] = Field(default=None, max_length=80)
     low_stock_threshold: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
     expiry_date: Optional[date] = None
     # Motif : obligatoire pour un caissier qui change le prix
@@ -172,6 +174,8 @@ class StockAdjustIn(BaseModel):
     quantity_change: float = Field(ge=-MAX_MONEY, le=MAX_MONEY)
     type: Literal["restock", "adjustment"]
     reason: Optional[str] = Field(default=None, max_length=255)
+    # Coût d'achat unitaire de ce réapprovisionnement (propriétaire). Vide : prix d'achat actuel du produit.
+    unit_cost: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY)
 
     @field_validator("quantity_change")
     @classmethod
@@ -179,6 +183,48 @@ class StockAdjustIn(BaseModel):
         if v == 0:
             raise ValueError("la variation doit être différente de 0")
         return v
+
+
+class FundStartIn(BaseModel):
+    """Démarre (ou remet à zéro) le suivi du fonds de réappro."""
+    opening_amount: float = Field(default=0, ge=0, le=MAX_MONEY)  # argent déjà disponible pour racheter du stock
+    motif: Optional[str] = Field(default=None, max_length=255)    # obligatoire pour une remise à zéro
+
+    @field_validator("opening_amount")
+    @classmethod
+    def _round(cls, v: float) -> float:
+        return _two_decimals(v)
+
+
+class FundAdjustIn(BaseModel):
+    amount: float = Field(ge=-MAX_MONEY, le=MAX_MONEY)  # positif : on ajoute ; négatif : on retire
+    motif: str = Field(max_length=255)
+
+    @field_validator("amount")
+    @classmethod
+    def _non_zero(cls, v: float) -> float:
+        v = _two_decimals(v)
+        if v == 0:
+            raise ValueError("le montant doit être différent de 0")
+        return v
+
+    @field_validator("motif")
+    @classmethod
+    def _motif(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if len(v) < 10:
+            raise ValueError("précise la raison en 10 caractères minimum")
+        return v
+
+
+class PurchaseLineIn(BaseModel):
+    product_id: str = Field(min_length=1, max_length=64)
+    quantity: float = Field(gt=0, le=1_000_000)
+
+
+class PurchaseOrderIn(BaseModel):
+    supplier: Optional[str] = Field(default=None, max_length=80)
+    lines: List[PurchaseLineIn] = Field(min_length=1, max_length=200)
 
 
 class QrSheetIn(BaseModel):
@@ -264,6 +310,7 @@ def product_out(product: dict, role: str) -> dict:
     out = {k: v for k, v in product.items() if k not in ("_id", "business_id")}
     if role != "owner":
         out.pop("purchase_price", None)
+        out.pop("supplier", None)
     return out
 
 
