@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Boxes, Plus, Search, X } from "lucide-react";
 import { qty } from "../lib/format";
 import { useIsDesktop } from "../lib/useMedia";
@@ -7,6 +7,8 @@ import { stockStatus, stockThreshold, useProducts } from "../state/data";
 import { Badge, Button, Empty, Spinner, Thumb, cx } from "../components/ui";
 import { PageHeader } from "../components/Layout";
 import RestockModal from "../components/RestockModal";
+import RestockPlanner from "../components/RestockPlanner";
+import { FundPanel, WinnersPanel } from "../components/StockInsights";
 
 // Pas de bouton « Exporter » : le backend du lot 2 n'a pas de route d'export (cahier 4.5).
 const FILTERS = [
@@ -17,12 +19,15 @@ const FILTERS = [
 const ORDER = { rupture: 0, faible: 1, normal: 2 };
 
 export default function Stock() {
-  const { auth } = useAuth();
+  const { auth, isOwner } = useAuth();
   const { products, loading } = useProducts();
   const desktop = useIsDesktop();
   const [filter, setFilter] = useState(null);
   const [q, setQ] = useState("");
   const [target, setTarget] = useState(null);
+  // Incrémenté après un réapprovisionnement ou un changement du fonds : les panneaux se rechargent.
+  const [rev, setRev] = useState(0);
+  const refresh = useCallback(() => setRev((r) => r + 1), []);
 
   const rows = useMemo(() => products.map((p) => ({ p, s: stockStatus(p, auth.business) })), [products, auth.business]);
   const counts = useMemo(() => rows.reduce((c, r) => ({ ...c, [r.s]: (c[r.s] || 0) + 1 }), {}), [rows]);
@@ -38,6 +43,12 @@ export default function Stock() {
   return (
     <div className="page">
       <PageHeader title="Stock" sub={desktop ? "Chaque réapprovisionnement est tracé dans le journal." : null} />
+      <div className="ssm-stack">
+        {isOwner && <FundPanel rev={rev} onChanged={refresh} />}
+        <WinnersPanel isOwner={isOwner} rev={rev} />
+        {isOwner && <RestockPlanner rev={rev} />}
+      </div>
+      <h2 className="ssm-h2">Tous les produits</h2>
       <div className="stock-counts">
         {[["normal", "Normal"], ["faible", "Stock faible"], ["rupture", "Rupture"]].map(([k]) => (
           <div key={k} className="tile stock-count"><b className="num">{counts[k] || 0}</b><Badge kind={k} /></div>
@@ -80,7 +91,7 @@ export default function Stock() {
           ))}
         </div>
       )}
-      {current && <RestockModal product={current} onClose={() => setTarget(null)} />}
+      {current && <RestockModal product={current} onClose={() => setTarget(null)} onDone={refresh} />}
     </div>
   );
 }
