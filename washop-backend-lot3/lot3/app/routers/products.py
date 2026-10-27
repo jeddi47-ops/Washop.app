@@ -23,7 +23,7 @@ router = APIRouter(tags=["products"])
 _QR_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
 PRICE_FIELDS = ("sale_price", "purchase_price")
 # Champs tracés par « product_updated » (sans motif). Les prix restent tracés par « product_price_changed ».
-TRACKED_FIELDS = ("name", "description", "category", "unit", "expiry_date", "low_stock_threshold")
+TRACKED_FIELDS = ("name", "description", "category", "unit", "expiry_date", "low_stock_threshold", "supplier")
 
 
 def _code_filter(business_id: str, code: str) -> dict:
@@ -59,6 +59,9 @@ async def _get_product(db, business_id: str, product_id: str, session=None) -> d
 async def create_product(body: ProductCreate, user: dict = Depends(get_current_user), db=Depends(get_db)):
     """Patron et caissier. Code-barres saisi ou scanné (barcode), ou QR généré (qr). 409 PRODUCT_EXISTS si le code existe."""
     business_id = user["business_id"]
+    supplier = (body.supplier or "").strip() or None
+    if supplier and user["role"] != "owner":
+        raise AppError(403, "Le fournisseur est réservé au patron.")
     code = body.code if body.code_type == "barcode" else await _new_qr_code(db, business_id)
     await _raise_if_code_taken(db, business_id, code)
 
@@ -74,6 +77,7 @@ async def create_product(body: ProductCreate, user: dict = Depends(get_current_u
         "unit": body.unit,
         "sale_price": body.sale_price,
         "purchase_price": body.purchase_price,
+        "supplier": supplier,
         "quantity": initial,
         "low_stock_threshold": body.low_stock_threshold,
         "expiry_date": start_of_day(body.expiry_date) if body.expiry_date else None,
@@ -173,6 +177,10 @@ async def update_product(product_id: str, body: ProductUpdate, user: dict = Depe
             changes.pop(key)  # champs obligatoires : un null ne les efface pas
     if user["role"] != "owner" and "purchase_price" in changes:
         raise AppError(403, "Le prix d'achat est réservé au patron.")
+    if user["role"] != "owner" and "supplier" in changes:
+        raise AppError(403, "Le fournisseur est réservé au patron.")
+    if "supplier" in changes:
+        changes["supplier"] = (changes["supplier"] or "").strip() or None
     if "expiry_date" in changes:
         changes["expiry_date"] = start_of_day(changes["expiry_date"]) if changes["expiry_date"] else None
     if changes.get("name"):
@@ -273,14 +281,20 @@ async def adjust_stock(product_id: str, body: StockAdjustIn, user: dict = Depend
         updated = await apply_stock_delta(db, business_id, product_id, delta, session=s)
         if updated is None:
             raise HTTPException(409, f"Stock insuffisant pour « {product['name']} » : {product['quantity']:g} disponible(s).")
+        # Coût d'achat du réapprovisionnement : saisi par le patron, sinon prix d'achat actuel (un caissier ne le voit pas).
+        unit_cost = None
+        if body.type == "restock":
+            unit_cost = body.unit_cost if (user["role"] == "owner" and body.unit_cost is not None) else product.get("purchase_price")
         await db.stock_movements.insert_one(build_movement(
             business_id=business_id, product_id=product_id, movement_type=body.type,
             quantity_change=delta, quantity_after=updated["quantity"], created_by=user["id"], reason=body.reason,
+            unit_cost=unit_cost,
         ), session=s)
         await write_audit(db, audit_entry(
             user, "product_stock_adjusted", "product", product_id,
             old_value={"quantity": product["quantity"]},
-            new_value={"quantity": updated["quantity"], "type": body.type, "reason": body.reason},
+            new_value={"quantity": updated["quantity"], "type": body.type, "reason": body.reason,
+                       **({"unit_cost": unit_cost} if unit_cost is not None else {})},
             product_ids=[product_id],
         ), session=s)
         return updated
