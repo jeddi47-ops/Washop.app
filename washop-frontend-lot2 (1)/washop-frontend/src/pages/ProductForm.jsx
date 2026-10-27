@@ -11,7 +11,7 @@ import CameraScanner from "../components/CameraScanner";
 import RestockModal from "../components/RestockModal";
 import { useMotifFlow } from "../components/useMotifFlow";
 
-const EMPTY = { name: "", category: "", sale_price: "", purchase_price: "", initial_quantity: "", unit: "pièce", low_stock_threshold: "", expiry_date: "", description: "" };
+const EMPTY = { name: "", category: "", sale_price: "", purchase_price: "", supplier: "", initial_quantity: "", unit: "pièce", low_stock_threshold: "", expiry_date: "", description: "" };
 
 function toForm(p) {
   return {
@@ -19,6 +19,7 @@ function toForm(p) {
     category: p.category || "",
     sale_price: p.sale_price != null ? String(p.sale_price).replace(".", ",") : "",
     purchase_price: p.purchase_price != null ? String(p.purchase_price).replace(".", ",") : "",
+    supplier: p.supplier || "",
     unit: p.unit || "pièce",
     low_stock_threshold: p.low_stock_threshold != null ? String(p.low_stock_threshold).replace(".", ",") : "",
     expiry_date: p.expiry_date ? String(p.expiry_date).slice(0, 10) : "",
@@ -61,6 +62,7 @@ function ProductFields({ form, setForm, errors, isOwner, creating }) {
       <Field label="Prix de vente (FC)" error={errors.sale_price}><input inputMode="decimal" value={form.sale_price} onChange={set("sale_price")} /></Field>
       {/* Prix d'achat : jamais affiché ni envoyé pour un caissier */}
       {isOwner && <Field label="Prix d'achat (FC)" error={errors.purchase_price}><input inputMode="decimal" value={form.purchase_price} onChange={set("purchase_price")} /></Field>}
+      {isOwner && <Field label="Fournisseur" hint="Facultatif. Sert à regrouper les bons de commande."><input value={form.supplier} onChange={set("supplier")} maxLength={80} /></Field>}
       {creating && <Field label="Quantité en stock" error={errors.initial_quantity}><input inputMode="decimal" value={form.initial_quantity} onChange={set("initial_quantity")} placeholder="0" /></Field>}
       <Field label="Seuil de stock faible" error={errors.low_stock_threshold} hint="Vide : seuil par défaut du commerce"><input inputMode="decimal" value={form.low_stock_threshold} onChange={set("low_stock_threshold")} /></Field>
       <Field label="Date de péremption"><input type="date" value={form.expiry_date} onChange={set("expiry_date")} /></Field>
@@ -159,6 +161,7 @@ export function ProductNew() {
       code_type: codeType,
       ...(codeType === "barcode" ? { code: code.trim() } : {}),
       ...(isOwner && form.purchase_price !== "" ? { purchase_price: parseNumber(form.purchase_price) } : {}),
+      ...(isOwner && form.supplier.trim() ? { supplier: form.supplier.trim() } : {}),
     };
     setSaving(true);
     try {
@@ -321,6 +324,7 @@ export function ProductEdit({ id }) {
     if (isOwner && form.purchase_price !== original.purchase_price && parseNumber(form.purchase_price) !== parseNumber(original.purchase_price)) {
       d.purchase_price = form.purchase_price === "" ? 0 : parseNumber(form.purchase_price);
     }
+    if (isOwner && form.supplier.trim() !== original.supplier) d.supplier = form.supplier.trim() || null;
     if (form.low_stock_threshold !== original.low_stock_threshold) d.low_stock_threshold = form.low_stock_threshold === "" ? null : parseNumber(form.low_stock_threshold);
     if (form.expiry_date !== original.expiry_date) d.expiry_date = form.expiry_date || null;
     if (form.description.trim() !== original.description) d.description = form.description.trim() || null;
